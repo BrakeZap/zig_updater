@@ -25,7 +25,7 @@ pub fn main() !void {
     var iter = iter_dir.iterate();
 
     while (try iter.next()) |entry| {
-        if (std.mem.count(u8, entry.name, "beans") > 0) {
+        if (std.mem.count(u8, entry.name, "zig-x86_64") > 0) {
             //Found zig. Delete file in home
             std.debug.print("Zig already installed. Uninstalling now...\n", .{});
             const str = try std.fmt.allocPrint(allocator, "/home/kyles/{s}", .{entry.name});
@@ -34,7 +34,7 @@ pub fn main() !void {
 
             //Delete symlink
 
-            try std.fs.deleteFileAbsolute("/home/kyles/.local/bin/beans");
+            try std.fs.deleteFileAbsolute("/home/kyles/.local/bin/zig");
 
             break;
         }
@@ -92,17 +92,23 @@ pub fn main() !void {
     defer temp.deinit();
 
     std.debug.print("{s}\n", .{mirrorList});
+
+    const fileName = try std.fmt.allocPrint(allocator, "zig-x86_64-linux-{s}.tar.xz", .{version});
+    defer allocator.free(fileName);
+
+    const filePath = try std.fmt.allocPrint(allocator, "/home/kyles/{s}", .{fileName});
+    defer allocator.free(filePath);
+
+    std.debug.print("File path: {s}\n", .{filePath});
+
+    const pubKey = "RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U";
     //Loop through all mirrors
     for (mirrorList) |value| {
         if (value != '\n') {
             try temp.append(value);
         } else {
-            const pubKey = "RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U";
             var mirrorRes = std.ArrayList(u8).init(allocator);
             defer mirrorRes.deinit();
-
-            const fileName = try std.fmt.allocPrint(allocator, "zig-x86_64-linux-{s}.tar.xz", .{version});
-            defer allocator.free(fileName);
 
             const url = try std.fmt.allocPrint(allocator, "{s}/{s}?source=github-brakezap-zig-updater", .{ temp.items, fileName });
             defer allocator.free(url);
@@ -123,11 +129,6 @@ pub fn main() !void {
                 std.debug.print("Status code: {?s}\n", .{req.response.status.phrase()});
                 continue;
             }
-
-            const filePath = try std.fmt.allocPrint(allocator, "/home/kyles/{s}", .{fileName});
-            defer allocator.free(filePath);
-
-            std.debug.print("File name: {s}\n", .{filePath});
 
             const tarFile = try std.fs.createFileAbsolute(filePath, .{});
             try req.reader().readAllArrayList(&mirrorRes, 500000000);
@@ -175,9 +176,9 @@ pub fn main() !void {
             _ = try child.wait();
 
             std.debug.print("Result: {s}\n", .{stdout.items});
-            std.debug.print("Errors: {s}\n", .{stderr.items});
 
             if (stderr.items.len > 0) {
+                std.debug.print("Errors: {s}\n", .{stderr.items});
                 std.debug.print("Downloaded Zig binary does not match checksum, potentially corrupt mirror. Please remove mirror from list!\n", .{});
 
                 std.debug.print("Removing corrupted files...\n", .{});
@@ -190,9 +191,45 @@ pub fn main() !void {
         }
     }
 
-    std.debug.print("Successfully downloaded Zig binaries!", .{});
+    std.debug.print("Successfully downloaded Zig binaries!\n", .{});
 
+    std.debug.print("Extracting Zig binaries...\n", .{});
     //Extract Zig binaries
+    var argv = std.ArrayList([]const u8).init(allocator);
+    defer argv.deinit();
+
+    try argv.append("tar");
+    try argv.append("-xf");
+    try argv.append(fileName);
+
+    var child = std.process.Child.init(argv.items, allocator);
+
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.cwd = "/home/kyles/";
+
+    var stdout: std.ArrayListUnmanaged(u8) = .empty;
+    defer stdout.deinit(allocator);
+    var stderr: std.ArrayListUnmanaged(u8) = .empty;
+    defer stderr.deinit(allocator);
+
+    try child.spawn();
+    try child.collectOutput(allocator, &stdout, &stderr, 1024);
+    _ = try child.wait();
+    if (stderr.items.len > 0) {
+        std.debug.print("Error extracting file! Errors: {s}", .{stderr.items});
+
+        return;
+    }
 
     //Create symlink in /home/kyles/.local/bin/zig
+
+    const dirName = try std.fmt.allocPrint(allocator, "/home/kyles/zig-x86_64-linux-{s}/zig", .{version});
+
+    defer allocator.free(dirName);
+    try std.fs.symLinkAbsolute(dirName, "/home/kyles/.local/bin/zig", .{});
+
+    std.debug.print("Link successfully created!\n", .{});
+
+    std.debug.print("All done!\n", .{});
 }
